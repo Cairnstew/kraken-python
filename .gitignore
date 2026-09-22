@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+
+# Environment / secrets
+.env
+
+# WebSocket token scratch (never committed)
+.kraken-ws-token
+
+# Logs
+*.log
+
+# Test / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
