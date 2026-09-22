@@ -35,6 +35,19 @@
       #
       nixosModules.default = import ./nix/module.nix;
 
+      # ── Checks ───────────────────────────────────────────────────────────
+      # `nix flake check` evaluates the NixOS module against representative
+      # configurations and asserts the generated env-writer behaves
+      # (keyfile vs plain credentials, settings, ordering).
+      checks = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          kraken-module = pkgs.callPackage ./nix/checks.nix { };
+        }
+      );
+
       # ── Dev Shell ─────────────────────────────────────────────────────────
       # `nix develop` drops you into a shell with Python, requests,
       # websocket-client, and pytest on PATH.

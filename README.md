@@ -60,6 +60,36 @@ cp .env.example .env        # fill in KRAKEN_API_KEY and KRAKEN_API_SECRET
 nix develop                # drops you into a shell with python + deps
 ```
 
+As a NixOS module (package on PATH + optional credentials):
+
+```nix
+# flake.nix
+inputs.kraken-python.url = "github:Cairnstew/kraken-python";
+# ...
+imports = [ inputs.kraken-python.nixosModules.default ];
+services.kraken-python = {
+  enable = true;
+  credentials = {
+    # agenix-style keyfiles — resolved at activation time, never in the
+    # store.  Defaults to waiting on agenix-activation.service; override
+    # credentials.after for sops-nix or other secret managers.
+    apiKeyFile = "/run/secrets/kraken_api_key";
+    apiSecretFile = "/run/secrets/kraken_api_secret";
+  };
+  settings = {
+    # optional KRAKEN_* overrides (mirrors .env.example)
+    # minInterval = "0.08";
+  };
+};
+# Optional: run your own unit with the same credentials:
+#   systemd.services.foo.serviceConfig.EnvironmentFile =
+#     [ config.services.kraken-python.envFilePath ];
+```
+
+`nix flake check` runs a module check (`.#checks.<system>.kraken-module`)
+that evaluates the module against keyfile / plain / envFile configs and
+asserts the generated env-writer.
+
 ### Or plain pip
 
 ```bash
