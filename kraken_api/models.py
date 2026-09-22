@@ -469,3 +469,337 @@ class LedgerEntry:
 
     def __str__(self) -> str:
         return f"{self.entry_type} {self.amount} {self.asset} -> {self.balance}"
+
+
+@dataclass(slots=True)
+class TradeBalance:
+    """One TradeBalance snapshot: equity, margin, buying power, ...
+
+    All values are raw strings from the API; use the ``*_decimal`` accessors
+    to get :class:`decimal.Decimal`.  ``from_kraken`` maps the API's short
+    keys (``eb``, ``tb``, ``m``, ...) to readable attribute names; unknown
+    keys are captured in ``extra``.
+    """
+
+    equivalent_balance: str = ""       # eb — balance used for margin/buying power calc
+    trade_balance: str = ""            # tb — current trade balance
+    margin: str = ""                   # m — current margin amount
+    unrealized_pnl: str = ""           # n — unrealised net profit/loss
+    cost_basis: str = ""               # c — cost basis
+    floating_valuation: str = ""       # v — current floating valuation
+    equity: str = ""                   # e — equity
+    free_margin: str = ""              # mf — free margin
+    margin_used: str = ""              # t (optional) — margin used
+    extra: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_kraken(cls, data: dict[str, Any]) -> "TradeBalance":
+        mapping = {
+            "eb": "equivalent_balance",
+            "tb": "trade_balance",
+            "m": "margin",
+            "n": "unrealized_pnl",
+            "c": "cost_basis",
+            "v": "floating_valuation",
+            "e": "equity",
+            "mf": "free_margin",
+            "t": "margin_used",
+        }
+        known = {attr: "" for attr in mapping.values()}
+        extra: dict[str, str] = {}
+        for key, value in (data or {}).items():
+            attr = mapping.get(key)
+            if attr is not None:
+                known[attr] = str(value)
+            else:
+                extra[key] = str(value)
+        return cls(**known, extra=extra)
+
+    @property
+    def equity_decimal(self) -> Decimal:
+        return as_decimal(self.equity) if self.equity else Decimal("0")
+
+    @property
+    def free_margin_decimal(self) -> Decimal:
+        return as_decimal(self.free_margin) if self.free_margin else Decimal("0")
+
+    def decimal(self, key: str) -> Decimal | None:
+        """Best-effort Decimal for a named field."""
+        if key in ("extra",):
+            return None
+        value = getattr(self, key, None)
+        return as_decimal(value) if value not in (None, "") else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "equivalent_balance": self.equivalent_balance,
+            "trade_balance": self.trade_balance,
+            "margin": self.margin,
+            "unrealized_pnl": self.unrealized_pnl,
+            "cost_basis": self.cost_basis,
+            "floating_valuation": self.floating_valuation,
+            "equity": self.equity,
+            "free_margin": self.free_margin,
+            "margin_used": self.margin_used,
+            **{f"extra.{k}": v for k, v in sorted(self.extra.items())},
+        }
+
+    def __str__(self) -> str:
+        return f"equity={self.equity} trade_balance={self.trade_balance} free_margin={self.free_margin}"
+
+
+@dataclass(slots=True)
+class SpreadPoint:
+    """One spread sample: timestamp plus best bid/ask prices.
+
+    Public ``Spread`` rows arrive as ``[time, bid, ask]``; prices are raw
+    strings and there is no volume or size component.
+    """
+
+    pair: str
+    time: int
+    bid: str
+    ask: str
+
+    @classmethod
+    def from_row(cls, pair: str, row: list[Any]) -> "SpreadPoint":
+        vals = list(row) + ["", ""]
+        return cls(pair=pair, time=int(vals[0] or 0), bid=str(vals[1]), ask=str(vals[2]))
+
+    @property
+    def iso(self) -> str:
+        return _fmt_ts(self.time)
+
+    @property
+    def bid_decimal(self) -> Decimal:
+        return as_decimal(self.bid)
+
+    @property
+    def ask_decimal(self) -> Decimal:
+        return as_decimal(self.ask)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"pair": self.pair, "time": self.time, "iso": self.iso, "bid": self.bid, "ask": self.ask}
+
+    def __str__(self) -> str:
+        return f"{self.pair} {self.iso} bid={self.bid} ask={self.ask}"
+
+
+@dataclass(slots=True)
+class Asset:
+    """One asset from the ``/0/public/Assets`` catalog.
+
+    ``asset`` is the REST asset code (``XXBT``); ``altname`` is the
+    exchange-facing short name (``XBT``).  Decimals reflect the precision the
+    API uses for this asset.
+    """
+
+    asset: str
+    altname: str = ""
+    asset_class: str = "currency"
+    decimals: int = 8
+    display_decimals: int = 8
+    collateral_value: str = ""   # sometimes a string; keep raw
+    status: str = "online"
+
+    @classmethod
+    def from_kraken(cls, asset: str, info: dict[str, Any]) -> "Asset":
+        return cls(
+            asset=asset,
+            altname=info.get("altname") or "",
+            asset_class=info.get("aclass") or "currency",
+            decimals=int(info.get("decimals") or 8),
+            display_decimals=int(info.get("display_decimals") or 8),
+            collateral_value=str(info.get("collateral_value") or ""),
+            status=info.get("status") or "online",
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "asset": self.asset,
+            "altname": self.altname,
+            "asset_class": self.asset_class,
+            "decimals": self.decimals,
+            "display_decimals": self.display_decimals,
+            "collateral_value": self.collateral_value,
+            "status": self.status,
+        }
+
+    def __str__(self) -> str:
+        return f"{self.altname or self.asset} ({self.asset_class}, {self.decimals} decimals, {self.status})"
+
+
+# ------------------------------------------------------------------ #
+# WebSocket v2 message models
+# ------------------------------------------------------------------ #
+
+
+@dataclass(slots=True)
+class WsTicker:
+    """One ticker data item from the WS v2 ``ticker`` channel.
+
+    Unlike the REST :class:`Ticker` (two-window tuples), WS v2 sends a flat
+    object with a single bid/ask/last.  All price fields are raw strings;
+    use ``*_decimal`` for numbers.
+    """
+
+    symbol: str = ""
+    bid: str = ""
+    bid_qty: str = ""
+    ask: str = ""
+    ask_qty: str = ""
+    last: str = ""
+    volume: str = ""
+    vwap: str = ""
+    low: str = ""
+    high: str = ""
+    change: str = ""
+    change_pct: str = ""
+
+    @classmethod
+    def from_ws(cls, item: dict[str, Any]) -> "WsTicker":
+        return cls(
+            symbol=str(item.get("symbol") or ""),
+            bid=str(item.get("bid") or ""),
+            bid_qty=str(item.get("bid_qty") or ""),
+            ask=str(item.get("ask") or ""),
+            ask_qty=str(item.get("ask_qty") or ""),
+            last=str(item.get("last") or ""),
+            volume=str(item.get("volume") or ""),
+            vwap=str(item.get("vwap") or ""),
+            low=str(item.get("low") or ""),
+            high=str(item.get("high") or ""),
+            change=str(item.get("change") or ""),
+            change_pct=str(item.get("change_pct") or ""),
+        )
+
+    @property
+    def last_decimal(self) -> Decimal:
+        return as_decimal(self.last) if self.last else Decimal("0")
+
+    def decimal(self, key: str) -> Decimal | None:
+        value = getattr(self, key, None) or ""
+        return as_decimal(value) if value else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "bid": self.bid,
+            "bid_qty": self.bid_qty,
+            "ask": self.ask,
+            "ask_qty": self.ask_qty,
+            "last": self.last,
+            "volume": self.volume,
+            "vwap": self.vwap,
+            "low": self.low,
+            "high": self.high,
+            "change": self.change,
+            "change_pct": self.change_pct,
+        }
+
+    def __str__(self) -> str:
+        return f"{self.symbol} last={self.last} bid={self.bid} ask={self.ask}"
+
+
+@dataclass(slots=True)
+class WsTrade:
+    """One trade data item from the WS v2 ``trade`` channel.
+
+    ``time`` is epoch *milliseconds* (the WS channel uses ms; `iso` converts).
+    """
+
+    symbol: str = ""
+    id: str = ""
+    side: str = ""
+    price: str = ""
+    qty: str = ""
+    time: int = 0
+    order_type: str = ""
+
+    @classmethod
+    def from_ws(cls, item: dict[str, Any]) -> "WsTrade":
+        return cls(
+            symbol=str(item.get("symbol") or ""),
+            id=str(item.get("id") or ""),
+            side=str(item.get("side") or ""),
+            price=str(item.get("price") or ""),
+            qty=str(item.get("qty") or ""),
+            time=int(item.get("time") or 0),
+            order_type=str(item.get("order_type") or ""),
+        )
+
+    @property
+    def iso(self) -> str:
+        return _fmt_ts(self.time, ms=True)
+
+    @property
+    def price_decimal(self) -> Decimal:
+        return as_decimal(self.price) if self.price else Decimal("0")
+
+    @property
+    def qty_decimal(self) -> Decimal:
+        return as_decimal(self.qty) if self.qty else Decimal("0")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "id": self.id,
+            "side": self.side,
+            "price": self.price,
+            "qty": self.qty,
+            "time": self.time,
+            "iso": self.iso,
+            "order_type": self.order_type,
+        }
+
+    def __str__(self) -> str:
+        return f"{self.side} {self.qty} {self.symbol} @ {self.price} ({self.id})"
+
+
+@dataclass(slots=True)
+class WsBook:
+    """One book data item from the WS v2 ``book`` channel.
+
+    ``bids``/``asks`` hold :class:`BookLevel` entries; a ``snapshot`` marks
+    the initial full book (later items are delta updates).  ``checksum`` is
+    the CRC32 the client should verify against the levels.
+    """
+
+    symbol: str = ""
+    bids: list[BookLevel] = field(default_factory=list)
+    asks: list[BookLevel] = field(default_factory=list)
+    snapshot: bool = True
+    checksum: int = 0
+
+    @classmethod
+    def from_ws(cls, item: dict[str, Any], *, snapshot: bool = True) -> "WsBook":
+        return cls(
+            symbol=str(item.get("symbol") or ""),
+            bids=[BookLevel.from_row(r) for r in (item.get("bids") or [])],
+            asks=[BookLevel.from_row(r) for r in (item.get("asks") or [])],
+            snapshot=snapshot,
+            checksum=int(item.get("checksum") or 0),
+        )
+
+    def best_bid(self) -> Decimal | None:
+        return self.bids[0].price_decimal if self.bids else None
+
+    def best_ask(self) -> Decimal | None:
+        return self.asks[0].price_decimal if self.asks else None
+
+    def spread(self) -> Decimal | None:
+        if not self.asks or not self.bids:
+            return None
+        return self.asks[0].price_decimal - self.bids[0].price_decimal
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "snapshot": self.snapshot,
+            "bids": [lvl.to_dict() for lvl in self.bids],
+            "asks": [lvl.to_dict() for lvl in self.asks],
+            "checksum": self.checksum,
+        }
+
+    def __str__(self) -> str:
+        return f"{self.symbol} {'snapshot' if self.snapshot else 'update'} {len(self.bids)} bids / {len(self.asks)} asks"

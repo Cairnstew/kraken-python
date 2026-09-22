@@ -25,18 +25,21 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable
 
-from .catalog import PairCatalog
+from .catalog import Pair, PairCatalog
 from .client import KrakenClient
 from .logging_config import log_event
 from .models import (
+    Asset,
     Balance,
     Candle,
     LedgerEntry,
     Order,
     OrderBook,
     ServerTime,
+    SpreadPoint,
     Ticker,
     Trade,
+    TradeBalance,
 )
 
 _USER_LOG = logging.getLogger("kraken_api.user")
@@ -156,6 +159,31 @@ class KrakenManager:
         rows = data.get(pub) or _first_value(data) or []
         return [Trade.from_public_row(ws, row) for row in rows], str(data.get("last") or "")
 
+    def spread(self, pair: str, since: int | None = None) -> tuple[list[SpreadPoint], str]:
+        """Return (spread points, last) recent best bid/ask samples for a market."""
+        data = self.client.spread(pair, since=since)
+        pub = self.catalog.resolve(pair, style="pub")
+        ws = self.catalog.resolve(pair, style="ws")
+        rows = data.get(pub) or _first_value(data) or []
+        return [SpreadPoint.from_row(ws, row) for row in rows], str(data.get("last") or "")
+
+    # ------------------------------------------------------------------ #
+    # Reference data
+    # ------------------------------------------------------------------ #
+
+    def assets(self) -> dict[str, Asset]:
+        """Return the asset catalog: REST asset code -> typed :class:`Asset`."""
+        raw = self.client.assets()
+        return {
+            code: Asset.from_kraken(code, info)
+            for code, info in (raw or {}).items()
+            if isinstance(info, dict)
+        }
+
+    def asset_pairs(self) -> list[Pair]:
+        """Return all known trading pairs as typed :class:`Pair` records."""
+        return self.catalog.known_pairs()
+
     # ------------------------------------------------------------------ #
     # Account
     # ------------------------------------------------------------------ #
@@ -174,9 +202,13 @@ class KrakenManager:
                 return Balance.from_entry(code, amount)
         return None
 
-    def trade_balance(self, asset: str | None = None) -> dict[str, Any]:
-        """Return the raw trade-balance summary dict (``eb``, ``tb``, ``m``, ...)."""
-        return self.client.trade_balance(asset=asset)
+    def trade_balance(self, asset: str | None = None) -> TradeBalance:
+        """Return the trade-balance summary as a typed :class:`TradeBalance`.
+
+        ``asset`` selects a specific asset's balance (defaults to the
+        overall ZUSD-equivalent).
+        """
+        return TradeBalance.from_kraken(self.client.trade_balance(asset=asset))
 
     # ------------------------------------------------------------------ #
     # Orders

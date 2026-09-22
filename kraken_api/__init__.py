@@ -10,6 +10,7 @@ conversions yourself.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from .auth import client_from_credentials, client_from_env
 from .catalog import Pair, PairCatalog
@@ -26,6 +27,7 @@ from .errors import (
 )
 from .manager import KrakenManager
 from .models import (
+    Asset,
     Balance,
     BookLevel,
     Candle,
@@ -33,13 +35,18 @@ from .models import (
     Order,
     OrderBook,
     ServerTime,
+    SpreadPoint,
     Ticker,
     Trade,
+    TradeBalance,
+    WsBook,
+    WsTicker,
+    WsTrade,
 )
-from .websocket import SpotWebSocket
+from .websocket import SpotWebSocket, decode_message
 from .watch import blocks_until_tick, watch_ticker
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 # Library-safe default: attach a NullHandler so that importing the package
 # never configures logging or emits output.  Call setup_logging() from the
@@ -65,6 +72,18 @@ __all__ = [
     "Order",
     "Trade",
     "LedgerEntry",
+    "TradeBalance",
+    "SpreadPoint",
+    "Asset",
+    "WsTicker",
+    "WsTrade",
+    "WsBook",
+    "decode_message",
+    "extract",
+    "extract_many",
+    "extract_snapshot",
+    "write_json",
+    "write_jsonl",
     "KrakenError",
     "AuthenticationError",
     "ConfigurationError",
@@ -75,3 +94,12 @@ __all__ = [
     "WebSocketError",
     "__version__",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy re-exports that avoid import cycles (export imports manager)."""
+    if name in ("extract", "extract_many", "extract_snapshot", "write_json", "write_jsonl"):
+        from . import export as _export
+
+        return getattr(_export, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

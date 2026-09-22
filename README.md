@@ -34,8 +34,15 @@ this wrapper underneath.
   book / trade / private channels, plus `watch_ticker` / `blocks_until_tick`
   helpers that turn the feed into change-detecting generators.
 - **Typed models** — `Ticker`, `Candle`, `OrderBook`, `Balance`, `Order`,
-  `Trade`, `LedgerEntry` dataclasses with `from_kraken()` conversions,
-  `to_dict()` JSON output, and *raw string* prices so no precision is lost.
+  `Trade`, `LedgerEntry`, `TradeBalance`, `SpreadPoint`, `Asset`, plus the
+  WebSocket v2 message models (`WsTicker`, `WsTrade`, `WsBook`) — dataclasses
+  with `from_kraken()` / `from_ws()` conversions, `to_dict()` JSON output,
+  and *raw string* prices so no precision is lost.
+- **JSON extraction infra** — a resource registry
+  (`kraken_api.export.py`) makes every endpoint pull as clean, typed JSON in
+  one call: `extract(mgr, "tickers", pairs=[...])`, `extract_many(...)`,
+  `extract_snapshot(...)`, plus `write_json` / `write_jsonl` (NDJSON) writers
+  and an `iter_ws_jsonl` stream helper for the WebSocket feed.
 - **Batteries included** — a tiny CLI (`cli.py` / `kraken-python`), a Nix
   dev shell, an offline test suite (including the official Kraken signing
   vector), and a live-verification script
@@ -171,6 +178,36 @@ private.connect()
 private.subscribe("balances")
 ```
 
+### JSON extraction (typed, one clean call)
+
+The extraction registry turns any resource into JSON-ready structures —
+always `json.dumps`-able, whatever the endpoint returns:
+
+```python
+from kraken_api import KrakenManager
+from kraken_api.export import extract, extract_many, extract_snapshot, write_json, write_jsonl
+
+mgr = KrakenManager.from_env()
+
+# One resource...
+doc = extract(mgr, "tickers", pairs=["BTC/USD", "ETH/USD"])
+doc = extract(mgr, "book", pair="BTC/USD")            # adds best_bid/best_ask/spread
+doc = extract(mgr, "trade-balance")                   # typed TradeBalance fields
+
+# ...or a whole envelope: schema + exported_at + resources
+feed = extract_many(mgr, ["server-time", "book", "tickers"], pairs=["BTC/USD"])
+snap = extract_snapshot(mgr, pairs=["BTC/USD"], include_account=True)
+
+write_json(snap, "snapshot.json")                     # pretty JSON
+write_jsonl(iter_ws_jsonl(ws, channel="ticker"), "ticks.jsonl")   # NDJSON stream
+```
+
+Registry: `server-time`, `tickers`, `ohlc`, `book`, `trades`, `spread`,
+`balance`, `trade-balance`, `orders`, `closed-orders`, `order`, `history`,
+`ledger`, `assets`, `pairs` — every extractor returns only strings, ints,
+lists and dicts, and the WebSocket `ticker`/`book`/`trade` data items decode
+through the typed `Ws*` models too.
+
 ### Auth (it's just two environment variables)
 
 | Variable                     | Needed for                        |
@@ -185,26 +222,40 @@ strictly-increasing millisecond nonce — handled for you in
 
 ## CLI
 
+Every command accepts `--json` for clean JSON on stdout (compact or pretty);
+`ws` emits one JSON object per line (NDJSON) and can write to a file.
+
 ```bash
 python cli.py ticker BTC/USD ETH/USD             # market data
+python cli.py ticker BTC/USD --json              # same, as JSON
 python cli.py ohlc BTC/USD --interval 60
-python cli.py book BTC/USD
-python cli.py pairs                               # catalog (ws names)
+python cli.py book BTC/USD --json                # book + best bid/ask/spread
+python cli.py spread BTC/USD
+python cli.py pairs --json                       # full catalog records
+python cli.py assets
 python cli.py snapshot out.json --pair BTC/USD --pair ETH/USD --include-account
 
+# Extraction registry
+python cli.py extract book --pair BTC/USD --output book.json
+python cli.py extract all --pair BTC/USD --output snapshot.json
+python cli.py extract tickers --pair BTC/USD --jsonl --output ticks.jsonl
+
 # Authenticated (requires credentials)
-python cli.py balance
+python cli.py balance --json
+python cli.py trade-balance
 python cli.py orders
 python cli.py closed --limit 5
 python cli.py order <txid>
 python cli.py history --limit 10
+python cli.py ledger
 python cli.py buy BTC/USD 0.001 27000             # limit buy
 python cli.py sell BTC/USD 0.001                  # market sell
 python cli.py cancel <txid>
 python cli.py cancel-all
 
-# Real-time
+# Real-time (NDJSON on stdout by default)
 python cli.py ws ticker BTC/USD --timeout 15
+python cli.py ws ticker BTC/USD --timeout 15 --output feed.jsonl
 ```
 
 ## Project layout
@@ -219,7 +270,8 @@ kraken_api/
     models.py      # typed dataclasses (with to_dict() for JSON)
     websocket.py   # SpotWebSocket v2 client (public + private channels)
     watch.py       # watch_ticker / blocks_until_tick real-time helpers
-    export.py      # market/account snapshots -> JSON
+    export.py      # JSON extraction registry: extract / extract_many /
+                   #   extract_snapshot, write_json / write_jsonl, iter_ws_jsonl
     utils.py       # decimal + timestamp + batching helpers
     errors.py      # exception hierarchy
     logging_config.py  # structured JSON logging + secret redaction

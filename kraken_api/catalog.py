@@ -65,6 +65,17 @@ class Pair:
     def symbols(self) -> tuple[str, str]:
         return (self.ws, self.alt, self.pub)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pub": self.pub,
+            "alt": self.alt,
+            "ws": self.ws,
+            "base": self.base,
+            "quote": self.quote,
+            "pair_decimals": self.pair_decimals,
+            "lot_decimals": self.lot_decimals,
+        }
+
     def __str__(self) -> str:
         return self.ws
 

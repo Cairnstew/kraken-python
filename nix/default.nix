@@ -10,7 +10,7 @@
 
 python3.pkgs.buildPythonApplication {
   pname = "kraken-python";
-  version = "0.1.0";
+  version = "0.3.0";
   format = "pyproject";
 
   # Clean source: exclude git, cache, venv, and nix from the Nix store.

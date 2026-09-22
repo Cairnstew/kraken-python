@@ -11,7 +11,7 @@ import json
 import pytest
 
 from kraken_api.errors import WebSocketError
-from kraken_api.websocket import SpotWebSocket, publish_ticker_update
+from kraken_api.websocket import SpotWebSocket, decode_message, publish_ticker_update
 
 
 class FakeSocket:
@@ -175,3 +175,53 @@ def test_publish_ticker_update_flattens() -> None:
     assert flat["symbol"] == "BTC/USD"
     assert flat["last"] == "27000.1"
     assert flat["change_pct"] == ""
+
+
+def test_decode_message_models_ticker_data() -> None:
+    decoded = decode_message(
+        {
+            "channel": "ticker",
+            "type": "update",
+            "data": [{"symbol": "BTC/USD", "bid": "26999.0", "ask": "27000.0", "last": "26999.5"}],
+        }
+    )
+    assert decoded["channel"] == "ticker"
+    assert decoded["type"] == "update"
+    assert decoded["data"][0]["symbol"] == "BTC/USD"
+    assert decoded["data"][0]["last"] == "26999.5"
+    assert json.dumps(decoded)
+
+
+def test_decode_message_models_trade_data() -> None:
+    decoded = decode_message(
+        {
+            "channel": "trade",
+            "type": "update",
+            "data": [{"symbol": "BTC/USD", "id": "99", "side": "sell", "price": "27000.0",
+                      "qty": "0.25", "time": 1700000000123, "order_type": "limit"}],
+        }
+    )
+    assert decoded["data"][0]["id"] == "99"
+    assert decoded["data"][0]["side"] == "sell"
+    assert decoded["data"][0]["iso"].startswith("2023-")
+    assert json.dumps(decoded)
+
+
+def test_decode_message_models_book_snapshot() -> None:
+    decoded = decode_message(
+        {
+            "channel": "book",
+            "type": "snapshot",
+            "data": [{"symbol": "BTC/USD", "bids": [["26999.0", "1.0", 1700000000]],
+                      "asks": [["27000.0", "2.0", 1700000000]], "checksum": 42}],
+        }
+    )
+    item = decoded["data"][0]
+    assert item["snapshot"] is True
+    assert item["bids"][0]["price"] == "26999.0"
+    assert json.dumps(decoded)
+
+
+def test_decode_message_passthrough_control() -> None:
+    decoded = decode_message({"event": "heartbeat", "time_in": "2023-01-01T00:00:00"})
+    assert decoded["event"] == "heartbeat"

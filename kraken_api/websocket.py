@@ -33,6 +33,7 @@ from typing import Any, Iterator
 
 from .errors import WebSocketError
 from .logging_config import log_event
+from .models import WsTicker, WsTrade, WsBook
 
 _WS_LOG = logging.getLogger("kraken_api.ws")
 
@@ -267,18 +268,37 @@ def publish_ticker_update(data_item: dict[str, Any]) -> dict[str, Any]:
     """Normalise one WS v2 ticker data item into a flat JSON-able dict.
 
     The API sends full-string precision fields; this keeps the raw strings
-    and adds nothing but the pair.  Not a :class:`~kraken_api.models.Ticker`
-    (that is REST-shaped); the Watch helpers favour these dicts.
+    and adds nothing but the pair.  Delegates to :class:`WsTicker` so the
+    Watch helpers and the typed extraction layer agree on one shape.
     """
-    return {
-        "symbol": data_item.get("symbol", ""),
-        "bid": data_item.get("bid", ""),
-        "bid_qty": data_item.get("bid_qty", ""),
-        "ask": data_item.get("ask", ""),
-        "ask_qty": data_item.get("ask_qty", ""),
-        "last": data_item.get("last", ""),
-        "volume": data_item.get("volume", ""),
-        "high": data_item.get("high", ""),
-        "low": data_item.get("low", ""),
-        "change_pct": data_item.get("change_pct", ""),
-    }
+    return WsTicker.from_ws(data_item).to_dict()
+
+
+def decode_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Turn a raw WS v2 message into a JSON-safe dict.
+
+    Data-bearing messages (``ticker``, ``trade``, ``book``) have each data
+    item converted through its typed model (:class:`WsTicker`,
+    :class:`WsTrade`, :class:`WsBook`); the outer channel/type/sequence
+    envelope is preserved.  Control messages (heartbeat, ack, pong) pass
+    through unchanged — they are already JSON-safe dicts.
+
+    The result always round-trips through ``json.dumps`` — usable directly
+    as the JSONL emitter for ``kraken-python ws --jsonl``.
+    """
+    channel = message.get("channel")
+    data = message.get("data") or []
+    items: list[Any]
+    if channel == "ticker":
+        items = [WsTicker.from_ws(item).to_dict() for item in data]
+    elif channel == "trade":
+        items = [WsTrade.from_ws(item).to_dict() for item in data]
+    elif channel == "book":
+        snapshot = message.get("type", "update") == "snapshot"
+        items = [WsBook.from_ws(item, snapshot=snapshot).to_dict() for item in data]
+    else:
+        items = list(data)
+
+    out: dict[str, Any] = dict(message)
+    out["data"] = items
+    return out
