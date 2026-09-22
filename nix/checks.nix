@@ -93,7 +93,8 @@ let
 
   join = builtins.concatStringsSep ",";
 in
-pkgs.runCommand "kraken-python-module-checks" {
+pkgs.runCommand "kraken-python-module-checks"
+{
   keyfile = scriptOf cfgKeyfile;
   stringC = scriptOf cfgString;
   settingsC = scriptOf cfgSettings;
