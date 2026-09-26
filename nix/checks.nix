@@ -81,6 +81,19 @@ let
     credentials.envFile = "/etc/kraken/.env";
   };
 
+  # Paper settings alone must trigger the env writer (no credentials).
+  cfgPaperOnly = {
+    enable = true;
+    package = pkgs.hello;
+    settings = {
+      paperBalance = "5000";
+      paperFeeTaker = "0.0026";
+      paperFeeMaker = "0.0016";
+      paperPrice = "last";
+      paperState = "/var/lib/kraken-paper/state.json";
+    };
+  };
+
   cfgDisabled = {
     enable = false;
     package = pkgs.hello;
@@ -100,6 +113,7 @@ pkgs.runCommand "kraken-python-module-checks"
   settingsC = scriptOf cfgSettings;
   envfileC = scriptOf cfgEnvFileOnly;
   disabledC = scriptOf cfgDisabled;
+  paperC = scriptOf cfgPaperOnly;
   afterDefault = join (afterOf cfgKeyfile);
   afterCustom = join (afterOf cfgCustomAfter);
 } ''
@@ -128,6 +142,13 @@ pkgs.runCommand "kraken-python-module-checks"
   grep -Fq 'btc' <<<"$settingsC"
   if grep -Fq 'KRAKEN_UNSET' <<<"$settingsC"; then
     echo "FAIL: null extra var must be skipped"; exit 1; fi
+
+  # Paper settings alone trigger the env writer and land verbatim.
+  grep -Fq 'KRAKEN_PAPER_BALANCE=5000' <<<"$paperC"
+  grep -Fq 'KRAKEN_PAPER_FEE_TAKER=0.0026' <<<"$paperC"
+  grep -Fq 'KRAKEN_PAPER_FEE_MAKER=0.0016' <<<"$paperC"
+  grep -Fq 'KRAKEN_PAPER_PRICE=last' <<<"$paperC"
+  grep -Fq 'KRAKEN_PAPER_STATE=/var/lib/kraken-paper/state.json' <<<"$paperC"
 
   # envFile / disabled configs must not generate an env writer at all.
   if [ -n "$envfileC" ]; then

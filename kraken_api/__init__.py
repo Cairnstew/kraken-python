@@ -43,10 +43,11 @@ from .models import (
     WsTicker,
     WsTrade,
 )
+from .paper import PaperAccount, PaperTransport, paper_client
 from .websocket import SpotWebSocket, decode_message
 from .watch import blocks_until_tick, watch_ticker
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # Library-safe default: attach a NullHandler so that importing the package
 # never configures logging or emits output.  Call setup_logging() from the
@@ -79,6 +80,9 @@ __all__ = [
     "WsTrade",
     "WsBook",
     "decode_message",
+    "PaperAccount",
+    "PaperTransport",
+    "paper_client",
     "extract",
     "extract_many",
     "extract_snapshot",

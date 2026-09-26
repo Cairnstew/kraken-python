@@ -152,6 +152,38 @@ in
         description = "KRAKEN_MIN_INTERVAL minimum seconds between REST calls (e.g. \"0.08\").";
       };
 
+      # Paper trading (KRAKEN_PAPER_*).  The simulation needs no credentials;
+      # these just tune its defaults.
+      paperBalance = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "KRAKEN_PAPER_BALANCE opening quote balance for paper trading (e.g. \"10000\").";
+      };
+
+      paperFeeTaker = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "KRAKEN_PAPER_FEE_TAKER fee rate for market fills (e.g. \"0.0026\").";
+      };
+
+      paperFeeMaker = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "KRAKEN_PAPER_FEE_MAKER fee rate for resting limit fills (e.g. \"0.0016\").";
+      };
+
+      paperPrice = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "KRAKEN_PAPER_PRICE fill trigger: \"book\" or \"last\".";
+      };
+
+      paperState = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "KRAKEN_PAPER_STATE JSON path persisting the paper account between runs.";
+      };
+
       # Catch-all for any other KRAKEN_* variable (written verbatim).
       # Null values are skipped, which lets you explicitly clear an
       # inherited environment variable.
@@ -176,6 +208,11 @@ in
         || cfg.settings.wsUrl != null
         || cfg.settings.wsAuthUrl != null
         || cfg.settings.minInterval != null
+        || cfg.settings.paperBalance != null
+        || cfg.settings.paperFeeTaker != null
+        || cfg.settings.paperFeeMaker != null
+        || cfg.settings.paperPrice != null
+        || cfg.settings.paperState != null
         || cfg.settings.extra != { });
 
       # Individual env lines, in stable order: credentials first, then
@@ -188,8 +225,13 @@ in
         ++ lib.optional (cfg.settings.restUrl != null) (valueLine "KRAKEN_REST_URL" cfg.settings.restUrl)
         ++ lib.optional (cfg.settings.wsUrl != null) (valueLine "KRAKEN_WS_URL" cfg.settings.wsUrl)
         ++ lib.optional (cfg.settings.wsAuthUrl != null) (valueLine "KRAKEN_WS_AUTH_URL" cfg.settings.wsAuthUrl)
-        ++ lib.optional (cfg.settings.minInterval != null) (valueLine "KRAKEN_MIN_INTERVAL" cfg.settings.minInterval)
-        ++ lib.concatLists (lib.mapAttrsToList
+++ lib.optional (cfg.settings.minInterval != null) (valueLine "KRAKEN_MIN_INTERVAL" cfg.settings.minInterval)
+  ++ lib.optional (cfg.settings.paperBalance != null) (valueLine "KRAKEN_PAPER_BALANCE" cfg.settings.paperBalance)
+  ++ lib.optional (cfg.settings.paperFeeTaker != null) (valueLine "KRAKEN_PAPER_FEE_TAKER" cfg.settings.paperFeeTaker)
+  ++ lib.optional (cfg.settings.paperFeeMaker != null) (valueLine "KRAKEN_PAPER_FEE_MAKER" cfg.settings.paperFeeMaker)
+  ++ lib.optional (cfg.settings.paperPrice != null) (valueLine "KRAKEN_PAPER_PRICE" cfg.settings.paperPrice)
+  ++ lib.optional (cfg.settings.paperState != null) (valueLine "KRAKEN_PAPER_STATE" cfg.settings.paperState)
+  ++ lib.concatLists (lib.mapAttrsToList
           (name: value: lib.optional (value != null) (valueLine name value))
           cfg.settings.extra);
     in

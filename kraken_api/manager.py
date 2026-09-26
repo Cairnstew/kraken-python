@@ -82,6 +82,44 @@ class KrakenManager:
 
         return cls(client_from_credentials(api_key, api_secret, **kwargs))
 
+    @classmethod
+    def paper(cls, **kwargs: Any) -> "KrakenManager":
+        """Build a manager wired to the paper-trading simulation.
+
+        Public market data comes from the real (public, unauthenticated)
+        API; account balances and order state are simulated in memory.  No
+        ``KRAKEN_API_KEY`` is needed.  Configure via ``KRAKEN_PAPER_*`` env
+        vars (balance, fees, price mode, state file) or ``kwargs``.
+        """
+        from .paper import paper_client
+
+        return cls(paper_client(**kwargs))
+
+    # ------------------------------------------------------------------ #
+    # Paper trading
+    # ------------------------------------------------------------------ #
+
+    @property
+    def paper_account(self) -> Any:
+        """The :class:`~kraken_api.paper.PaperAccount` of a paper manager.
+
+        Lets you inspect or reset the simulation (``balances``,
+        ``open_orders``, ``reset()``, ...).  Raises :class:`AttributeError`
+        when the manager is not wired for paper trading.
+        """
+        account = getattr(self.client.transport, "account", None)
+        if account is None:
+            raise AttributeError("this manager is not paper trading (no paper account)")
+        return account
+
+    def settle(self) -> int:
+        """Advance the paper simulation: fill crossings and honor the dead-man switch.
+
+        Returns how many resting orders filled.  Only meaningful on a paper
+        manager; regular managers raise :class:`AttributeError`.
+        """
+        return int(self.paper_account.settle())
+
     # ------------------------------------------------------------------ #
     # Server / reference data
     # ------------------------------------------------------------------ #

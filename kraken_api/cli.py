@@ -20,7 +20,9 @@ Usage (from the dev shell):
 Every command accepts ``--json`` to emit clean JSON on stdout (the
 ``ws`` command emits a JSON object per line).  ``extract`` pulls a named
 resource through the :mod:`kraken_api.export` registry and can write
-``--jsonl`` streams.
+``--jsonl`` streams.  The global ``--paper`` switch runs any command
+against the simulated paper account (real market data, fake fills, no
+API key): ``kraken-python --paper buy BTC/USD 0.001``.
 
 Authenticates against KRAKEN_API_KEY / KRAKEN_API_SECRET (see .env.example).
 """
@@ -56,6 +58,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-log-file",
         action="store_true",
         help="disable file logging entirely",
+    )
+    parser.add_argument(
+        "--paper",
+        action="store_true",
+        help="run against the simulated paper account (no API key needed)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -191,6 +198,8 @@ def _emit_json(payload: Any, args: argparse.Namespace, pretty: bool = False) -> 
 
 
 def _mgr(args: argparse.Namespace) -> KrakenManager:
+    if getattr(args, "paper", False):
+        return KrakenManager.paper()
     return KrakenManager.from_env()
 
 

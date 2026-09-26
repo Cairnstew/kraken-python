@@ -30,6 +30,11 @@ this wrapper underneath.
 - **Account & trading** — balances, trade balance, open/closed orders,
   order query, order placement (market/limit/stop variants), cancels
   (single, all, dead-man's-switch), trade history, and the ledger.
+- **Paper trading** — `KrakenManager.paper()` simulates an account over
+  *real* market data with **no API key**: market orders fill at the live
+  bid/ask, limit orders rest and fill when the market crosses them, taker
+  and maker fees are applied, and balances/orders/history/ledger all behave
+  like the real endpoints. Persist the account with `KRAKEN_PAPER_STATE`.
 - **Real-time** — a sync WebSocket v2 client (`SpotWebSocket`) for ticker /
   book / trade / private channels, plus `watch_ticker` / `blocks_until_tick`
   helpers that turn the feed into change-detecting generators.
@@ -144,6 +149,36 @@ mgr.cancel(txid)
 mgr.cancel_all()
 ```
 
+### Paper trading (no API key)
+
+Run the same strategy functions against a simulated account fed by real
+market data — market orders fill at the live bid/ask, limit orders fill
+when the market crosses them, taker/maker fees are applied, and
+balances/orders/history/ledger behave like the real endpoints:
+
+```python
+from kraken_api import KrakenManager
+
+mgr = KrakenManager.paper()             # simulated 10000 USD to start
+
+txid = mgr.buy("BTC/USD", volume="0.001")["txid"][0]  # fills at the live ask
+print(mgr.balances())                   # USD down, XBT up (fee deducted)
+order = mgr.order(txid)                 # typed Order, status "closed"
+
+mgr.buy("BTC/USD", volume="0.001", price="0.01")   # far-off limit → rests
+print(mgr.paper_account.open_orders)    # order resting in the sim book
+mgr.settle()                            # check crossings (auto-runs on reads)
+```
+
+Configure via env vars (see `.env.example`): `KRAKEN_PAPER_BALANCE`,
+`KRAKEN_PAPER_QUOTE`, `KRAKEN_PAPER_FEE_TAKER` (default 0.0026),
+`KRAKEN_PAPER_FEE_MAKER` (0.0016), `KRAKEN_PAPER_PRICE`
+(`book`|`last`, default `book`), and `KRAKEN_PAPER_STATE` to persist the
+account to a JSON file between runs.  The CLI exposes the same via
+`--paper` (below).  Everything runs through the normal structured log —
+fills, rests, cancels, and settles are logged to the `kraken_api.paper`
+logger (`--verbose` for the per-settle DEBUG detail).
+
 ### Real-time (WebSocket v2)
 
 ```python
@@ -219,6 +254,8 @@ There is no OAuth: every private request is signed with
 `HMAC-SHA512(base64decode(secret), path + sha256(nonce + body))` and a
 strictly-increasing millisecond nonce — handled for you in
 `kraken_api/transport.py`. Public market data works with no credentials.
+Paper trading needs *no credentials either* — it uses public market data
+and a simulated account (`KrakenManager.paper()` or `--paper`).
 
 ## CLI
 
@@ -256,6 +293,12 @@ python cli.py cancel-all
 # Real-time (NDJSON on stdout by default)
 python cli.py ws ticker BTC/USD --timeout 15
 python cli.py ws ticker BTC/USD --timeout 15 --output feed.jsonl
+
+# Paper trading (simulated account, no API key needed)
+python cli.py --paper balance
+python cli.py --paper buy BTC/USD 0.001          # fills at the live ask
+python cli.py --paper sell BTC/USD 0.001 999999  # rests (maker), then...
+python cli.py --paper orders
 ```
 
 ## Project layout
@@ -272,6 +315,7 @@ kraken_api/
     watch.py       # watch_ticker / blocks_until_tick real-time helpers
     export.py      # JSON extraction registry: extract / extract_many /
                    #   extract_snapshot, write_json / write_jsonl, iter_ws_jsonl
+    paper.py       # paper trading: PaperAccount + PaperTransport
     utils.py       # decimal + timestamp + batching helpers
     errors.py      # exception hierarchy
     logging_config.py  # structured JSON logging + secret redaction
@@ -290,7 +334,8 @@ endpoints) or `mgr.client.transport` (HTTP + signing) when you need to go
 beyond the friendly surface. Suggested next steps:
 
 - a strategy runner: poll `ticker`/`ohlc`, compute a signal, `buy`/`sell`
-- a paper-trading layer: snapshot orders before mutating, replay history
+- a paper-trading layer: built in — start with `KrakenManager.paper()`,
+  then trade the same strategy live by swapping the constructor
 - a stream consumer: keep a live order book / trades record from `ws`
 - richer private channels: balances/executions push from `ws-auth`
 

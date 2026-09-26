@@ -15,6 +15,7 @@ Loggers
 ``kraken_api.user``      user-initiated mutations (orders, cancels, ...)
 ``kraken_api.auth``      credential / signature lifecycle
 ``kraken_api.ws``        WebSocket connection and data events
+``kraken_api.paper``     paper-trading simulation (fills, settles, state)
 """
 
 from __future__ import annotations
@@ -227,6 +228,8 @@ def _get_logger(name: str) -> logging.Logger:
 def log_event(
     logger: str | logging.Logger,
     event: str,
+    *,
+    level: int | str = logging.INFO,
     **fields: Any,
 ) -> None:
     """Emit a structured log event with arbitrary extra fields.
@@ -237,16 +240,23 @@ def log_event(
         Logger name (string) or a ``logging.Logger`` instance.
     event:
         Human-readable event description (becomes ``record.getMessage()``).
+    level:
+        Log level for the record — an int (``logging.DEBUG``) or a level
+        name (``"DEBUG"``).  Defaults to ``INFO``; high-frequency events
+        (paper settle passes, price fetches) use ``DEBUG`` so they only
+        appear at verbose settings.
     **fields:
         Arbitrary key-value pairs attached to the record via ``extra=``.
         These are serialised by :class:`StructuredJsonFormatter` and
         ignored by the human-readable formatter.
     """
+    if isinstance(level, str):
+        level = getattr(logging, level.upper(), logging.INFO)
     if isinstance(logger, str):
         logger_obj = _get_logger(logger)
     else:
         logger_obj = logger
-    logger_obj.info(event, extra=fields)
+    logger_obj.log(level, event, extra=fields)
 
 
 # ---------------------------------------------------------------------------
